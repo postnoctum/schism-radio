@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schism radio</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="https://skzm.org/favicon.png">
+  <style>
+    body { min-height: 100vh; }
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.9rem clamp(1rem, 3vw, 2rem); border-bottom: 1px solid var(--seam); flex-wrap: wrap; }
+    .bar .brand { display: flex; align-items: center; gap: 0.7rem; font-family: var(--display); font-size: var(--step-2); text-decoration: none; line-height: 1; text-transform: uppercase; }
+    .bar .brand img { width: 72px; height: auto; }
+    .bar .brand span { color: var(--rift); }
+    .account { display: flex; align-items: center; gap: 0.6rem; font-size: var(--step--1); }
+    .role { color: var(--ash); }
+
+    main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 0; min-height: calc(100vh - 6.5rem); }
+    .station { padding: clamp(1rem, 3vw, 2rem); border-right: 1px solid var(--seam); }
+    .library { padding: clamp(1rem, 3vw, 2rem); background: var(--stone); }
+
+    .screen { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 3px; overflow: hidden; }
+    .screen iframe, .screen #yt { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .tune {
+      position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 0.8rem;
+      background: rgba(27, 32, 38, 0.86); text-align: center; padding: 1rem;
+    }
+    .tune[hidden] { display: none; }
+    .tune button { font-size: var(--step-1); padding: 0.7em 1.4em; }
+
+    .playing { margin-top: 1.25rem; }
+    .playing h1 { font: 700 var(--step-2) / 1.15 var(--body); text-transform: none; }
+    .playing .meta { color: var(--ash); margin-top: 0.3rem; }
+    .source { color: var(--rift); }
+    .source.new { color: var(--moss); }
+
+    .progress { display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem; align-items: center; margin-top: 1rem; font-size: var(--step--1); color: var(--ash); font-variant-numeric: tabular-nums; }
+    .track { height: 3px; background: var(--seam); position: relative; }
+    .track i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--rift); width: 0; }
+
+    .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 1rem; }
+    .controls label { display: flex; align-items: center; gap: 0.5rem; font-size: var(--step--1); color: var(--ash); }
+    .controls input[type="range"] { accent-color: var(--rift); width: 8rem; }
+    .listeners { margin-left: auto; font-size: var(--step--1); color: var(--ash); }
+
+    .lists { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2.25rem; }
+    .lists h2 { font-size: var(--step-2); margin-bottom: 0.6rem; }
+    ol.songs, ul.songs { list-style: none; margin: 0; padding: 0; }
+    .songs li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.2rem 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--seam); align-items: center; }
+    .songs li:first-child { border-top: 0; }
+    .songs .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .songs .s { grid-column: 1; font-size: var(--step--1); color: var(--ash); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .songs .acts { grid-column: 2; grid-row: 1 / span 2; display: flex; gap: 0.35rem; }
+    .songs .next-flag { color: var(--rift); }
+    .then { font-size: var(--step--1); color: var(--ash); margin-top: 0.75rem; }
+
+    .library h2 { font-size: var(--step-2); }
+    .add { display: flex; gap: 0.5rem; margin: 1rem 0 0.5rem; }
+    .add input { flex: 1; }
+    .add-hint { font-size: var(--step--1); color: var(--ash); margin: 0 0 1.25rem; }
+    .filter { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem; }
+    .filter input { flex: 1; }
+    .library .songs { max-height: 62vh; overflow-y: auto; padding-right: 0.25rem; }
+    .library .songs li { border-color: var(--seam); }
+    .empty { color: var(--ash); padding: 1rem 0; }
+    .locked { color: var(--ash); padding: 1rem 0; }
+
+    dialog { background: var(--stone); color: var(--bone); border: 1px solid var(--seam); border-radius: 4px; padding: 1.75rem; width: min(92vw, 26rem); }
+    dialog.wide { width: min(94vw, 46rem); }
+    dialog::backdrop { background: rgba(10, 12, 15, 0.7); }
+    dialog h2 { margin-bottom: 1rem; }
+    dialog form { display: grid; gap: 0.9rem; }
+    dialog label { display: grid; gap: 0.3rem; font-size: var(--step--1); color: var(--ash); }
+    .dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
+    .form-error { color: var(--danger); font-size: var(--step--1); min-height: 1.2em; margin: 0; }
+    .switch { background: none; color: var(--rift); padding: 0; text-decoration: underline; text-underline-offset: 0.2em; font-size: var(--step--1); }
+    .switch:hover { background: none; color: var(--bone); }
+
+    .admin-section + .admin-section { margin-top: 1.75rem; }
+    .admin-section h3 { margin-bottom: 0.6rem; }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+    th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--seam); }
+    th { color: var(--ash); font-weight: 500; }
+    td.c, th.c { text-align: center; }
+    td input[type="checkbox"] { accent-color: var(--rift); width: 1.05rem; height: 1.05rem; }
+    td input[type="number"] { width: 4.5rem; padding: 0.3em 0.4em; }
+    .users { max-height: 16rem; overflow-y: auto; }
+
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      .station { border-right: 0; border-bottom: 1px solid var(--seam); }
+      .library .songs { max-height: none; }
+    }
+    @media (max-width: 560px) {
+      .lists { grid-template-columns: 1fr; }
+      .listeners { margin-left: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <a class="discord-banner" data-discord href="https://skzm.org/discord">Join us on Discord <span class="arrow" aria-hidden="true">→</span></a>
+  <header class="bar">
+    <a class="brand" href="https://skzm.org"><img src="https://skzm.org/skzm-logo.webp" width="1400" height="932" alt="">Schism <span>radio</span></a>
+    <div class="account" id="account"></div>
+  </header>
+
+  <main>
+    <section class="station" aria-label="Now playing">
+      <div class="screen">
+        <div id="yt"></div>
+        <div class="tune" id="tune">
+          <p id="tune-msg">Everyone hears the same song at the same time.</p>
+          <button id="tune-btn" disabled>Tune in</button>
+        </div>
+      </div>
+
+      <div class="playing" aria-live="polite">
+        <h1 id="np-title">Connecting…</h1>
+        <p class="meta" id="np-meta"></p>
+      </div>
+
+      <div class="progress" aria-hidden="true">
+        <span id="elapsed">0:00</span><span class="track"><i id="bar"></i></span><span id="total">–:––</span>
+      </div>
+
+      <div class="controls">
+        <label>Volume <input type="range" id="volume" min="0" max="100" value="70"></label>
+        <button class="quiet small" id="stop" hidden>Stop listening</button>
+        <button class="quiet small" id="skip" hidden>Skip song</button>
+        <span class="listeners" id="listeners"></span>
+      </div>
+
+      <div class="lists">
+        <div>
+          <h2>Up next</h2>
+          <ol class="songs" id="queue"></ol>
+          <p class="then" id="then"></p>
+        </div>
+        <div>
+          <h2>Recently played</h2>
+          <ul class="songs" id="recent"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="library" aria-labelledby="lib-h">
+      <h2 id="lib-h">Library</h2>
+      <form class="add" id="add-form" hidden>
+        <label class="sr-only" for="add-url">YouTube link</label>
+        <input type="text" id="add-url" placeholder="Paste a YouTube link" autocomplete="off" required>
+        <button type="submit">Add song</button>
+      </form>
+      <p class="add-hint" id="add-hint" hidden>New songs play before anything in the library repeats.</p>
+      <div class="filter">
+        <label class="sr-only" for="search">Search the library</label>
+        <input type="search" id="search" placeholder="Search songs or who added them">
+      </div>
+      <p class="muted" id="lib-count" style="font-size:var(--step--1)"></p>
+      <ul class="songs" id="library"></ul>
+    </section>
+  </main>
+
+  <dialog id="auth">
+    <h2 id="auth-title">Sign in</h2>
+    <form id="auth-form" method="dialog">
+      <label>Username <input type="text" name="username" autocomplete="username" required minlength="2" maxlength="24"></label>
+      <label>Password <input type="password" name="password" autocomplete="current-password" required minlength="8"></label>
+      <p class="muted" id="auth-note" style="font-size:var(--step--1);margin:0" hidden></p>
+      <p class="form-error" id="auth-error"></p>
+      <div class="dialog-actions">
+        <button type="button" class="switch" id="auth-switch">Create an account instead</button>
+        <span>
+          <button type="button" class="quiet" id="auth-cancel">Cancel</button>
+          <button type="submit" id="auth-submit">Sign in</button>
+        </span>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="admin" class="wide">
+    <h2>Station settings</h2>
+    <div class="admin-section">
+      <h3>People</h3>
+      <div class="table-wrap users"><table id="users"></table></div>
+    </div>
+    <div class="admin-section">
+      <h3>What each role can do</h3>
+      <div class="table-wrap"><table id="perm-grid"></table></div>
+      <p class="form-error" id="admin-error"></p>
+    </div>
+    <div class="dialog-actions">
+      <span class="muted" style="font-size:var(--step--1)">Admins can always do everything.</span>
+      <span>
+        <button type="button" class="quiet" id="admin-close">Close</button>
+        <button type="button" id="admin-save">Save permissions</button>
+      </span>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="https://skzm.org/site.js" defer></script>
+  <script src="/radio.js" defer></script>
+</body>
+</html>

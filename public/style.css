@@ -1,0 +1,143 @@
+@import url("https://fonts.googleapis.com/css2?family=Rubik+Dirt&family=Barlow:ital,wght@0,400;0,500;0,700;1,400&family=Barlow+Condensed:wght@600;700&display=swap");
+
+:root {
+  --ink: #0a0a0a;        /* black */
+  --stone: #161616;      /* raised surfaces */
+  --seam: #2e2e2e;       /* lines, borders */
+  --bone: #f0ebe2;       /* white: the logo's ink */
+  --ash: #9d9d9d;        /* secondary text */
+  --rift: #d62030;       /* red from the logo's eye: the only accent */
+  --rift-deep: #6e0c15;
+  --moss: #f0ebe2;       /* "new to the library" (kept neutral) */
+  --danger: #ff8a7a;
+
+  --display: "Rubik Dirt", Impact, "Arial Black", sans-serif;
+  --label: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --body: "Barlow", "Segoe UI", system-ui, sans-serif;
+
+  --step--1: 0.875rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.3125rem;
+  --step-2: 1.875rem;
+  --step-3: 3rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--ink); color-scheme: dark; }
+body {
+  margin: 0;
+  font: 400 var(--step-0) / 1.55 var(--body);
+  color: var(--bone);
+  background: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+/* Film grain over everything; never blocks clicks. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  opacity: 0.06;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+a { color: var(--bone); text-decoration-color: var(--rift); text-decoration-thickness: 2px; text-underline-offset: 0.22em; }
+a:hover { color: var(--rift); }
+:focus-visible { outline: 2px solid var(--rift); outline-offset: 3px; border-radius: 2px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 400; line-height: 1; margin: 0; letter-spacing: 0.01em; text-transform: uppercase; }
+h2 { font-size: var(--step-3); }
+h3 { font-size: var(--step-1); }
+p { margin: 0 0 1em; }
+.muted { color: var(--ash); }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.label { font-family: var(--label); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--step--1); }
+
+button, .button {
+  font: 700 var(--step-0) / 1 var(--label);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bone);
+  background: var(--rift);
+  border: 0;
+  border-radius: 2px;
+  padding: 0.7em 1.15em;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  box-shadow: 0 0 0 0 rgba(214, 32, 48, 0);
+  transition: box-shadow 0.2s, background 0.2s;
+}
+button:hover, .button:hover { background: #ee2a3b; color: var(--bone); box-shadow: 0 0 24px 2px rgba(214, 32, 48, 0.45); }
+button.quiet, .button.quiet {
+  background: transparent;
+  color: var(--bone);
+  box-shadow: inset 0 0 0 1px var(--seam);
+}
+button.quiet:hover, .button.quiet:hover { box-shadow: inset 0 0 0 1px var(--rift); color: var(--bone); background: rgba(214, 32, 48, 0.12); }
+button.small, .button.small { font-size: var(--step--1); padding: 0.5em 0.75em; }
+button:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+input[type="text"], input[type="password"], input[type="search"], input[type="number"], select, textarea {
+  font: inherit;
+  color: var(--bone);
+  background: #070606;
+  border: 1px solid var(--seam);
+  border-radius: 2px;
+  padding: 0.6em 0.75em;
+  min-width: 0;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--rift); outline: none; box-shadow: 0 0 0 3px rgba(214, 32, 48, 0.2); }
+
+/* Discord banner: on every page. */
+.discord-banner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.55rem 1rem;
+  background: var(--rift);
+  color: var(--bone);
+  font: 700 var(--step--1) / 1.2 var(--label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  position: relative;
+  z-index: 5;
+}
+.discord-banner:hover { color: var(--bone); background: #ee2a3b; }
+.discord-banner svg { width: 1.3em; height: 1.3em; flex: none; }
+.discord-banner .arrow { transition: transform 0.2s; }
+.discord-banner:hover .arrow { transform: translateX(4px); }
+
+/* Ink drips hanging from a line: the section divider. */
+.drips {
+  display: block;
+  width: 100%;
+  height: 46px;
+  background: var(--rift);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 46' preserveAspectRatio='none'%3E%3Cpath d='M0 0H600V5C585 5 583 7 582 13 581 22 579 27 576 27 573 27 572 22 571 12 570 6 560 5 540 5 520 5 512 6 511 10 510 16 508 18 506 18 504 18 503 15 502 9 501 6 470 5 440 5 405 5 398 6 397 14 396 30 394 44 389 44 384 44 383 32 382 16 381 7 372 5 340 5 300 5 292 6 291 11 290 17 288 19 286 19 284 19 283 16 282 10 281 6 250 5 220 5 180 5 172 7 171 15 170 24 168 28 165 28 162 28 161 23 160 14 159 7 150 5 120 5 80 5 72 6 71 10 70 13 68 15 66 15 64 15 63 13 62 9 61 6 40 5 0 5Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 46' preserveAspectRatio='none'%3E%3Cpath d='M0 0H600V5C585 5 583 7 582 13 581 22 579 27 576 27 573 27 572 22 571 12 570 6 560 5 540 5 520 5 512 6 511 10 510 16 508 18 506 18 504 18 503 15 502 9 501 6 470 5 440 5 405 5 398 6 397 14 396 30 394 44 389 44 384 44 383 32 382 16 381 7 372 5 340 5 300 5 292 6 291 11 290 17 288 19 286 19 284 19 283 16 282 10 281 6 250 5 220 5 180 5 172 7 171 15 170 24 168 28 165 28 162 28 161 23 160 14 159 7 150 5 120 5 80 5 72 6 71 10 70 13 68 15 66 15 64 15 63 13 62 9 61 6 40 5 0 5Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  background: var(--bone);
+  color: var(--ink);
+  padding: 0.7em 1.1em;
+  border-radius: 2px;
+  max-width: min(90vw, 36rem);
+  z-index: 50;
+}
+.toast.error { background: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
