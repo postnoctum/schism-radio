@@ -8,7 +8,8 @@ const fmt = (sec) => {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
   return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(s).padStart(2, "0")}`;
 };
-const ROLE_NAMES = { guest: "Guest", member: "Member", trusted: "Trusted", officer: "Officer", admin: "Admin" };
+const SIGNED_OUT = "signedout";
+const ROLE_NAMES = { [SIGNED_OUT]: "Signed out", guest: "Guest", member: "Member", trusted: "Trusted", officer: "Officer", admin: "Admin" };
 const PERM_NAMES = {
   listen: "Listen",
   add: "Add songs",
@@ -17,6 +18,7 @@ const PERM_NAMES = {
   reorder: "Reorder queue",
   skip: "Skip",
   remove: "Remove anyone's queued songs",
+  roles: "Change roles (below their own)",
   delete: "Delete from library",
 };
 
@@ -77,7 +79,7 @@ function renderAccount() {
   const el = $("account");
   if (me.user) {
     el.innerHTML = `<span>${esc(me.user.username)} <span class="role">${ROLE_NAMES[me.role]}</span></span>
-      ${me.perms.includes("manage") ? '<button class="quiet small" id="open-admin">Settings</button>' : ""}
+      ${can("manage") ? '<button class="quiet small" id="open-admin">Settings</button>' : can("roles") ? '<button class="quiet small" id="open-admin">People</button>' : ""}
       <button class="quiet small" id="sign-out">Sign out</button>`;
     $("sign-out").onclick = attempt(async () => {
       await api("/api/logout", { method: "POST" });
@@ -143,10 +145,21 @@ $("auth-form").addEventListener("submit", async (e) => {
 // ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------
+const RANKS = ["guest", "member", "trusted", "officer", "admin"];
 async function openAdmin() {
-  const [{ users }, settings] = await Promise.all([api("/api/admin/users"), api("/api/admin/settings")]);
-  renderUsers(users, settings.roles);
-  renderGrid(settings);
+  const full = can("manage");
+  // People with "Change roles" but not admin get just the people list.
+  $("admin-title").textContent = full ? "Station settings" : "People";
+  $("perm-section").hidden = !full;
+  $("people-h").hidden = !full;
+  $("admin-save").hidden = !full;
+  $("admin-hint").textContent = full ? "Admins can always do everything." : "You can change roles for people below you.";
+  const { users } = await api("/api/admin/users");
+  if (full) {
+    const settings = await api("/api/admin/settings");
+    renderUsers(users, settings.roles);
+    renderGrid(settings);
+  } else renderUsers(users, RANKS.filter((r) => RANKS.indexOf(r) < RANKS.indexOf(me.role)));
   $("admin-error").textContent = "";
   if (!$("admin").open) $("admin").showModal();
 }
@@ -159,11 +172,15 @@ function renderUsers(users, roles) {
       .map(
         (u) => `<tr>
       <td>${esc(u.username)}</td>
-      <td><select data-user="${u.id}" aria-label="Role for ${esc(u.username)}">${roles
-          .map((r) => `<option value="${r}"${r === u.role ? " selected" : ""}>${ROLE_NAMES[r]}</option>`)
-          .join("")}</select></td>
+      <td>${
+        can("manage") || (u.id !== me.user.id && roles.includes(u.role))
+          ? `<select data-user="${u.id}" aria-label="Role for ${esc(u.username)}">${roles
+              .map((r) => `<option value="${r}"${r === u.role ? " selected" : ""}>${ROLE_NAMES[r]}</option>`)
+              .join("")}</select>`
+          : ROLE_NAMES[u.role]
+      }</td>
       <td class="muted">${new Date(u.created_at).toLocaleDateString()}</td>
-      <td>${u.id === me.user.id ? "" : `<button class="quiet small" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>`}</td>
+      <td>${u.id === me.user.id || !can("manage") ? "" : `<button class="quiet small" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>`}</td>
     </tr>`
       )
       .join("") +
@@ -187,8 +204,10 @@ function renderUsers(users, roles) {
 
 let gridRoles = [];
 function renderGrid(settings) {
-  gridRoles = settings.roles.filter((r) => r !== "admin");
+  // Signed out comes first and only ever gets Listen; everything else needs an account.
+  gridRoles = [SIGNED_OUT, ...settings.roles.filter((r) => r !== "admin")];
   const perms = Object.keys(PERM_NAMES);
+  const noAccount = `<td class="c muted" title="Needs an account">–</td>`;
   $("perm-grid").innerHTML =
     `<thead><tr><th></th>${gridRoles.map((r) => `<th class="c">${ROLE_NAMES[r]}</th>`).join("")}</tr></thead><tbody>` +
     perms
@@ -197,7 +216,9 @@ function renderGrid(settings) {
           `<tr><td>${PERM_NAMES[p]}</td>${gridRoles
             .map(
               (r) =>
-                `<td class="c"><input type="checkbox" data-role="${r}" data-perm="${p}" aria-label="${ROLE_NAMES[r]}: ${PERM_NAMES[p]}"${
+                r === SIGNED_OUT && p !== "listen"
+                  ? noAccount
+                  : `<td class="c"><input type="checkbox" data-role="${r}" data-perm="${p}" aria-label="${ROLE_NAMES[r]}: ${PERM_NAMES[p]}"${
                   settings.perms[r].includes(p) ? " checked" : ""
                 }></td>`
             )
@@ -207,7 +228,9 @@ function renderGrid(settings) {
     `<tr><td>Songs waiting in queue at once<br><span class="muted">0 means no limit</span></td>${gridRoles
       .map(
         (r) =>
-          `<td class="c"><input type="number" min="0" max="100" data-cap="${r}" value="${settings.queueCap[r]}" aria-label="${ROLE_NAMES[r]} queue limit"></td>`
+          r === SIGNED_OUT
+            ? noAccount
+            : `<td class="c"><input type="number" min="0" max="100" data-cap="${r}" value="${settings.queueCap[r]}" aria-label="${ROLE_NAMES[r]} queue limit"></td>`
       )
       .join("")}</tr></tbody>`;
 }
@@ -215,7 +238,7 @@ $("admin-save").onclick = async () => {
   const perms = {}, queueCap = {};
   for (const r of gridRoles) {
     perms[r] = [...$("perm-grid").querySelectorAll(`input[data-role="${r}"]:checked`)].map((i) => i.dataset.perm);
-    queueCap[r] = Number($("perm-grid").querySelector(`input[data-cap="${r}"]`).value);
+    if (r !== SIGNED_OUT) queueCap[r] = Number($("perm-grid").querySelector(`input[data-cap="${r}"]`).value);
   }
   try {
     await api("/api/admin/settings", { method: "PUT", body: { perms, queueCap } });
@@ -281,8 +304,10 @@ function ping() {
 setInterval(ping, 30000);
 
 function showLocked() {
-  $("np-title").textContent = "Sign in to listen";
-  $("np-meta").textContent = "The radio is open to guild members only right now.";
+  $("np-title").textContent = me.user ? "Listening is off for your role" : "Sign in to listen";
+  $("np-meta").textContent = me.user
+    ? "Your role can't listen right now. An officer can change that."
+    : "Listening is off for signed-out visitors. Create an account or sign in.";
   $("tune").hidden = false;
   $("tune-btn").disabled = true;
 }

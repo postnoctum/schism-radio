@@ -179,18 +179,18 @@
   </dialog>
 
   <dialog id="admin" class="wide">
-    <h2>Station settings</h2>
+    <h2 id="admin-title">Station settings</h2>
     <div class="admin-section">
-      <h3>People</h3>
+      <h3 id="people-h">People</h3>
       <div class="table-wrap users"><table id="users"></table></div>
     </div>
-    <div class="admin-section">
+    <div class="admin-section" id="perm-section">
       <h3>What each role can do</h3>
       <div class="table-wrap"><table id="perm-grid"></table></div>
       <p class="form-error" id="admin-error"></p>
     </div>
     <div class="dialog-actions">
-      <span class="muted" style="font-size:var(--step--1)">Admins can always do everything.</span>
+      <span class="muted" id="admin-hint" style="font-size:var(--step--1)">Admins can always do everything.</span>
       <span>
         <button type="button" class="quiet" id="admin-close">Close</button>
         <button type="button" id="admin-save">Save permissions</button>

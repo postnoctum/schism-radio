@@ -49,12 +49,16 @@ The station learns each song's length from the first listener who plays it and r
 | Add songs, queue songs | | ✓ | ✓ | ✓ | ✓ |
 | Play next | | | ✓ | ✓ | ✓ |
 | Reorder the queue (move songs up and down), skip, remove anyone's queued songs | | | | ✓ | ✓ |
+| Change roles for people below them (Guest, Member, Trusted for officers) | | | | ✓ | ✓ |
 | Delete from library, manage people | | | | | ✓ |
 
-These are defaults. From **Settings** on the radio page, admins can change any of them, along with how many songs each role can have waiting in the queue at once. Unchecking **Listen** for Guest makes the radio members-only.
+These are defaults. From **Settings** on the radio page, admins can change any of them, along with how many songs each role can have waiting in the queue at once.
+
+People who aren't signed in have their own **Signed out** column, which only has **Listen**. Everything else needs an account. Unchecking Listen for Signed out makes the radio accounts-only; unchecking it for Guest as well makes it members-only.
 
 A few more rules:
-- Anyone can sign up. New accounts start as Guest until an officer promotes them.
+- Anyone can sign up. New accounts start as Guest until an officer or admin promotes them.
+- **Change roles** only works on people below your own role, and only gives roles below your own. Officers see a People list; the permission grid and removing accounts stay admin-only.
 - People can always remove songs they queued themselves, and anyone with Play next can move their own queued song to the top. Moving someone else's song takes Reorder queue.
 - Five wrong passwords lock that username out for five minutes.
 - The station always keeps at least one admin.

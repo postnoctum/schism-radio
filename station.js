@@ -10,7 +10,7 @@ const scryptAsync = promisify(scrypt);
 // Roles and permissions
 // ---------------------------------------------------------------------------
 export const ROLES = ["guest", "member", "trusted", "officer", "admin"];
-export const PERMS = ["listen", "add", "queue", "playnext", "reorder", "skip", "remove", "delete", "manage"];
+export const PERMS = ["listen", "add", "queue", "playnext", "reorder", "skip", "remove", "roles", "delete", "manage"];
 // Permissions that existed before "reorder". Saved settings from then get defaults for anything newer.
 const ORIGINAL_PERMS = ["listen", "add", "queue", "playnext", "skip", "remove", "delete", "manage"];
 
@@ -19,12 +19,16 @@ const DEFAULTS = {
     guest: ["listen"],
     member: ["listen", "add", "queue"],
     trusted: ["listen", "add", "queue", "playnext"],
-    officer: ["listen", "add", "queue", "playnext", "reorder", "skip", "remove"],
+    officer: ["listen", "add", "queue", "playnext", "reorder", "skip", "remove", "roles"],
     admin: [...PERMS],
   },
   // Max songs one person can have waiting in the queue. 0 = no limit.
   queueCap: { guest: 1, member: 3, trusted: 5, officer: 0, admin: 0 },
 };
+
+// People who aren't signed in. Not a role anyone can be given: they can only ever listen,
+// and only if the Signed out column allows it. Everything else needs an account.
+export const SIGNED_OUT = "signedout";
 
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 // YouTube player errors that mean the video itself can't play (not the listener's browser).
@@ -216,6 +220,9 @@ export class Station {
     const saved = this.kvGet("settings", {});
     const known = saved.known ?? ORIGINAL_PERMS;
     const perms = {};
+    // Before the Signed out column existed, signed-out visitors followed Guest. Start from that.
+    const outListen = saved.perms?.[SIGNED_OUT] ?? saved.perms?.guest ?? DEFAULTS.perms.guest;
+    perms[SIGNED_OUT] = outListen.includes("listen") ? ["listen"] : [];
     const queueCap = {};
     for (const r of ROLES) {
       const mine = saved.perms?.[r];
@@ -230,7 +237,7 @@ export class Station {
     return { perms, queueCap };
   }
   can(user, perm) {
-    return this.settings().perms[user?.role ?? "guest"].includes(perm);
+    return this.settings().perms[user ? user.role : SIGNED_OUT].includes(perm);
   }
   need(user, perm) {
     if (!this.can(user, perm)) fail(user ? 403 : 401, user ? "Your role doesn't allow that." : "Sign in first.");
@@ -264,12 +271,12 @@ export class Station {
       if (path === "/api/skip" && method === "POST") return ok(this.skip(user));
 
       if (path === "/api/admin/users" && method === "GET") {
-        this.need(user, "manage");
+        if (!this.can(user, "roles")) this.need(user, "manage");
         return ok({ users: this.all("SELECT id, username, role, created_at FROM users ORDER BY username") });
       }
       if ((m = path.match(/^\/api\/admin\/users\/(\d+)$/))) {
+        if (method === "POST") return ok(this.changeRole(user, +m[1], body.role));
         this.need(user, "manage");
-        if (method === "POST") return ok(this.setRole(+m[1], body.role));
         if (method === "DELETE") return ok(this.deleteUser(+m[1]));
       }
       if (path === "/api/admin/settings") {
@@ -300,13 +307,13 @@ export class Station {
   }
 
   me(user) {
-    const role = user?.role ?? "guest";
+    const role = user ? user.role : SIGNED_OUT;
     const s = this.settings();
     return {
       user: user ? { id: user.id, username: user.username, role } : null,
       role,
       perms: s.perms[role],
-      queueCap: s.queueCap[role],
+      queueCap: s.queueCap[role] ?? 0,
       firstAccount: this.count("SELECT COUNT(*) AS n FROM users") === 0,
     };
   }
@@ -370,6 +377,20 @@ export class Station {
     return { status: 200, body: { ok: true }, cookie: { value: "", maxAge: 0 } };
   }
 
+  // Admins can set any role. Anyone with "Change roles" can only move people who are below
+  // their own role, and only to roles below their own (so officers handle Guest, Member, Trusted).
+  changeRole(actor, id, role) {
+    if (this.can(actor, "manage")) return this.setRole(id, role);
+    this.need(actor, "roles");
+    if (!ROLES.includes(role)) fail(400, "Unknown role.");
+    const target = this.get("SELECT role FROM users WHERE id = ?", id);
+    if (!target) fail(404, "That account no longer exists.");
+    const mine = ROLES.indexOf(actor.role);
+    if (ROLES.indexOf(target.role) >= mine) fail(403, "You can only change roles for people below you.");
+    if (ROLES.indexOf(role) >= mine) fail(403, "You can only give roles below your own.");
+    return this.setRole(id, role);
+  }
+
   setRole(id, role) {
     if (!ROLES.includes(role)) fail(400, "Unknown role.");
     const target = this.get("SELECT role FROM users WHERE id = ?", id);
@@ -397,6 +418,7 @@ export class Station {
   saveSettings(input) {
     const perms = {};
     const queueCap = {};
+    perms[SIGNED_OUT] = Array.isArray(input.perms?.[SIGNED_OUT]) && input.perms[SIGNED_OUT].includes("listen") ? ["listen"] : [];
     for (const r of ROLES) {
       if (r !== "admin")
         perms[r] = Array.isArray(input.perms?.[r])
