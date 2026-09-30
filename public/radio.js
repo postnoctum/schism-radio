@@ -14,6 +14,7 @@ const PERM_NAMES = {
   add: "Add songs",
   queue: "Queue songs",
   playnext: "Play next",
+  reorder: "Reorder queue",
   skip: "Skip",
   remove: "Remove anyone's queued songs",
   delete: "Delete from library",
@@ -23,6 +24,7 @@ let me = { user: null, role: "guest", perms: [] };
 let state = null;
 let library = [];
 let libv = -1, setv = -1;
+let lastQueueKey = null;
 let clockOffset = 0, bestRtt = Infinity;
 let socket = null, retry = 0;
 let player = null, playerReady = false, tunedIn = false, loadedPlayId = null, reportedFor = null;
@@ -297,6 +299,12 @@ function onState(s) {
     if (!first) loadMe().catch(() => {});
   }
   renderState();
+  // Library buttons (Queued, Play next) depend on the queue, so redraw them when it changes.
+  const qKey = s.queue.map((q) => `${q.id}:${q.track_id}:${q.user_id}`).join(",");
+  if (qKey !== lastQueueKey) {
+    lastQueueKey = qKey;
+    renderLibrary();
+  }
   syncPlayer();
 }
 
@@ -325,22 +333,40 @@ function renderState() {
   $("tune-btn").disabled = !now || !playerReady;
 
   const q = $("queue");
-  q.innerHTML = s.queue.length
-    ? s.queue
-        .map((it) => {
-          const mine = me.user && it.user_id === me.user.id;
-          const removable = can("remove") || mine;
-          return `<li><span class="t">${esc(it.title)}</span>
-            <span class="s">${it.priority === 0 ? '<span class="next-flag">Playing next</span> · ' : ""}${it.by ? `Queued by ${esc(it.by)}` : "Queued"}</span>
-            <span class="acts">${removable ? `<button class="quiet small" data-dequeue="${it.id}" aria-label="Remove ${esc(it.title)} from the queue">Remove</button>` : ""}</span></li>`;
-        })
-        .join("")
-    : `<li class="empty">The queue is empty.</li>`;
+  const last = s.queue.length - 1;
+  if (s.queue.length) {
+    q.innerHTML = s.queue
+      .map((it, i) => {
+        const mine = me.user && it.user_id === me.user.id;
+        const acts = [
+          can("reorder")
+            ? `<button class="quiet small" data-move="up" data-qid="${it.id}"${i === 0 ? " disabled" : ""} aria-label="Move ${esc(it.title)} up">Up</button>` +
+              `<button class="quiet small" data-move="down" data-qid="${it.id}"${i === last ? " disabled" : ""} aria-label="Move ${esc(it.title)} down">Down</button>`
+            : "",
+          can("remove") || mine ? `<button class="quiet small" data-dequeue="${it.id}" aria-label="Remove ${esc(it.title)} from the queue">Remove</button>` : "",
+        ].join("");
+        return `<li><span class="t">${esc(it.title)}</span>
+            <span class="s">${it.by ? `Queued by ${esc(it.by)}` : "Queued"}</span>
+            <span class="acts">${acts}</span></li>`;
+      })
+      .join("");
+  } else if (s.upNext) {
+    const u = s.upNext;
+    const from = u.source === "new" ? '<span class="source new">New to the library</span>' : "From shuffle";
+    q.innerHTML = `<li><span class="t">${esc(u.title)}</span>
+            <span class="s">${from}${u.channel ? ` · ${esc(u.channel)}` : ""}</span></li>`;
+  } else q.innerHTML = `<li class="empty">The queue is empty.</li>`;
   for (const b of q.querySelectorAll("[data-dequeue]"))
     b.onclick = attempt(() => api(`/api/queue/${b.dataset.dequeue}`, { method: "DELETE" }));
+  for (const b of q.querySelectorAll("[data-move]"))
+    b.onclick = attempt(() => api(`/api/queue/${b.dataset.qid}/move`, { method: "POST", body: { dir: b.dataset.move } }));
 
   const fresh = s.freshCount;
-  $("then").textContent = s.libSize
+  $("then").textContent = !s.queue.length
+    ? s.upNext
+      ? "The queue is empty, so this plays next from the library."
+      : ""
+    : s.libSize
     ? fresh
       ? `Then ${fresh} new ${fresh === 1 ? "song" : "songs"}, then shuffle across all ${s.libSize}.`
       : `Then shuffle across all ${s.libSize} songs.`
@@ -381,14 +407,18 @@ function renderLibrary() {
   $("lib-count").textContent = term
     ? `${rows.length} of ${library.length} songs`
     : `${library.length} ${library.length === 1 ? "song" : "songs"}, newest first`;
-  const queued = new Set((state?.queue || []).map((q) => q.track_id));
+  const queue = state?.queue || [];
+  const queued = new Map(queue.map((q) => [q.track_id, q]));
   list.innerHTML = rows.length
     ? rows
         .map((t) => {
-          const inQueue = queued.has(t.id);
+          const qrow = queued.get(t.id);
+          const inQueue = !!qrow;
+          // Play next on a queued song moves it to the top: fine for your own, otherwise it takes Reorder.
+          const canBump = !inQueue || (queue[0].track_id !== t.id && (can("reorder") || (me.user && qrow.user_id === me.user.id)));
           const acts = [
             can("queue") ? `<button class="quiet small" data-q="${t.id}"${inQueue ? " disabled" : ""}>${inQueue ? "Queued" : "Queue"}</button>` : "",
-            can("playnext") && !inQueue ? `<button class="quiet small" data-n="${t.id}">Play next</button>` : "",
+            can("playnext") && canBump ? `<button class="quiet small" data-n="${t.id}">Play next</button>` : "",
             can("delete") ? `<button class="quiet small" data-del="${t.id}" aria-label="Delete ${esc(t.title)}">Delete</button>` : "",
           ].join("");
           return `<li><span class="t" title="${esc(t.title)}">${esc(t.title)}</span>

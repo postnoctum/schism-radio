@@ -10,14 +10,16 @@ const scryptAsync = promisify(scrypt);
 // Roles and permissions
 // ---------------------------------------------------------------------------
 export const ROLES = ["guest", "member", "trusted", "officer", "admin"];
-export const PERMS = ["listen", "add", "queue", "playnext", "skip", "remove", "delete", "manage"];
+export const PERMS = ["listen", "add", "queue", "playnext", "reorder", "skip", "remove", "delete", "manage"];
+// Permissions that existed before "reorder". Saved settings from then get defaults for anything newer.
+const ORIGINAL_PERMS = ["listen", "add", "queue", "playnext", "skip", "remove", "delete", "manage"];
 
 const DEFAULTS = {
   perms: {
     guest: ["listen"],
     member: ["listen", "add", "queue"],
     trusted: ["listen", "add", "queue", "playnext"],
-    officer: ["listen", "add", "queue", "playnext", "skip", "remove"],
+    officer: ["listen", "add", "queue", "playnext", "reorder", "skip", "remove"],
     admin: [...PERMS],
   },
   // Max songs one person can have waiting in the queue. 0 = no limit.
@@ -57,7 +59,8 @@ CREATE TABLE IF NOT EXISTS queue (
   id INTEGER PRIMARY KEY,
   track_id INTEGER NOT NULL,
   user_id INTEGER,
-  priority INTEGER NOT NULL,   -- 0 = play next, 1 = queue
+  priority INTEGER NOT NULL DEFAULT 1,  -- unused since the queue became one list; kept for old databases
+  pos INTEGER,                          -- play order: lowest plays first
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS history (
@@ -151,10 +154,22 @@ export class Station {
     this.db = new Database(path.join(dataDir, "radio.db"));
     this.db.pragma("journal_mode = WAL");
     this.db.exec(SCHEMA);
+    this.migrate();
     this.lookup = lookup;
     this.sockets = new Set();
     this.timer = null;
     this.scheduleEnd(this.kvGet("now")); // pick up where we left off after a restart
+    this.refillBag(this.kvGet("now")?.trackId);
+  }
+
+  // Databases from before the one-list queue: Play next songs first, then the queue, same order as before.
+  migrate() {
+    const cols = this.all("PRAGMA table_info(queue)").map((c) => c.name);
+    if (cols.includes("pos")) return;
+    this.db.transaction(() => {
+      this.run("ALTER TABLE queue ADD COLUMN pos INTEGER");
+      this.all("SELECT id FROM queue ORDER BY priority, id").forEach((r, i) => this.run("UPDATE queue SET pos = ? WHERE id = ?", i + 1, r.id));
+    })();
   }
 
   close() {
@@ -199,10 +214,17 @@ export class Station {
   // --- permissions ----------------------------------------------------------
   settings() {
     const saved = this.kvGet("settings", {});
+    const known = saved.known ?? ORIGINAL_PERMS;
     const perms = {};
     const queueCap = {};
     for (const r of ROLES) {
-      perms[r] = r === "admin" ? [...PERMS] : saved.perms?.[r] ?? DEFAULTS.perms[r];
+      const mine = saved.perms?.[r];
+      perms[r] =
+        r === "admin"
+          ? [...PERMS]
+          : mine
+          ? [...mine, ...DEFAULTS.perms[r].filter((p) => !known.includes(p) && !mine.includes(p))]
+          : DEFAULTS.perms[r];
       queueCap[r] = saved.queueCap?.[r] ?? DEFAULTS.queueCap[r];
     }
     return { perms, queueCap };
@@ -238,6 +260,7 @@ export class Station {
         return ok({ ok: true });
       }
       if ((m = path.match(/^\/api\/queue\/(\d+)$/)) && method === "DELETE") return ok(this.dequeue(user, +m[1]));
+      if ((m = path.match(/^\/api\/queue\/(\d+)\/move$/)) && method === "POST") return ok(this.moveQueued(user, +m[1], body.dir));
       if (path === "/api/skip" && method === "POST") return ok(this.skip(user));
 
       if (path === "/api/admin/users" && method === "GET") {
@@ -382,7 +405,7 @@ export class Station {
       const cap = Math.floor(Number(input.queueCap?.[r]));
       queueCap[r] = cap >= 0 && cap <= 100 ? cap : DEFAULTS.queueCap[r];
     }
-    this.kvSet("settings", { perms, queueCap });
+    this.kvSet("settings", { perms, queueCap, known: PERMS });
     this.bump("setv");
     this.broadcast();
     return this.settings();
@@ -444,20 +467,50 @@ export class Station {
     return { ok: true };
   }
 
+  // One queue. Queue adds at the bottom; Play next puts the song at the very top,
+  // so the most recent Play next plays first.
   enqueue(user, trackId, next) {
     this.need(user, next ? "playnext" : "queue");
     if (!this.track(trackId)) fail(404, "That song isn't in the library.");
-    if (this.count("SELECT COUNT(*) AS n FROM queue WHERE track_id = ?", trackId)) fail(409, "That song is already in the queue.");
+    const existing = this.get("SELECT id, user_id FROM queue WHERE track_id = ?", trackId);
+    if (existing) {
+      if (!next) fail(409, "That song is already in the queue.");
+      // Bumping someone else's queued song is a reorder.
+      if (!(this.can(user, "reorder") || (user && existing.user_id === user.id)))
+        fail(403, "Someone else queued that song. Moving it needs the Reorder queue permission.");
+      this.run("UPDATE queue SET pos = ? WHERE id = ?", this.topPos(), existing.id);
+      return;
+    }
     const cap = this.settings().queueCap[user?.role ?? "guest"];
     if (user && cap > 0 && this.count("SELECT COUNT(*) AS n FROM queue WHERE user_id = ?", user.id) >= cap)
       fail(429, `You can have ${cap} ${cap === 1 ? "song" : "songs"} waiting at a time. Try again after one plays.`);
     this.run(
-      "INSERT INTO queue (track_id, user_id, priority, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO queue (track_id, user_id, priority, pos, created_at) VALUES (?, ?, 1, ?, ?)",
       trackId,
       user?.id ?? null,
-      next ? 0 : 1,
+      next ? this.topPos() : this.bottomPos(),
       Date.now()
     );
+  }
+  topPos() {
+    return this.get("SELECT COALESCE(MIN(pos), 1) - 1 AS p FROM queue").p;
+  }
+  bottomPos() {
+    return this.get("SELECT COALESCE(MAX(pos), 0) + 1 AS p FROM queue").p;
+  }
+
+  moveQueued(user, id, dir) {
+    this.need(user, "reorder");
+    if (dir !== "up" && dir !== "down") fail(400, "Songs move up or down.");
+    const ids = this.all("SELECT id FROM queue ORDER BY pos, id").map((r) => r.id);
+    const i = ids.indexOf(id);
+    if (i === -1) fail(404, "That song already left the queue.");
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (j < 0 || j >= ids.length) return { ok: true };
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    this.db.transaction(() => ids.forEach((qid, n) => this.run("UPDATE queue SET pos = ? WHERE id = ?", n + 1, qid)))();
+    this.changed();
+    return { ok: true };
   }
 
   dequeue(user, id) {
@@ -477,16 +530,15 @@ export class Station {
   }
 
   // --- choosing what plays --------------------------------------------------
-  // 1. Play Next  2. Queue  3. Songs never played yet (oldest first)  4. Shuffle bag
-  pickNext(currentId) {
+  // 1. Queue (top first)  2. Songs never played yet (oldest first)  3. Shuffle bag
+
+  // Works out what would play next without changing anything. Used for the "Up next" preview too.
+  peek(currentId) {
     const q = this.get(
       `SELECT q.id, q.track_id, u.username FROM queue q LEFT JOIN users u ON u.id = q.user_id
-       ORDER BY q.priority, q.id LIMIT 1`
+       ORDER BY q.pos, q.id LIMIT 1`
     );
-    if (q) {
-      this.run("DELETE FROM queue WHERE id = ?", q.id);
-      return { trackId: q.track_id, source: "queue", by: q.username || null };
-    }
+    if (q) return { trackId: q.track_id, source: "queue", by: q.username || null, queueId: q.id };
 
     const fresh = this.get(
       "SELECT id FROM tracks WHERE play_count = 0 AND id != ? ORDER BY added_at, id LIMIT 1",
@@ -494,27 +546,26 @@ export class Station {
     );
     if (fresh) return { trackId: fresh.id, source: "new" };
 
-    // Shuffle bag: every song plays once before anything repeats.
-    let bag = this.kvGet("bag", []);
-    for (;;) {
-      while (bag.length) {
-        const id = bag.shift();
-        if (id !== currentId && this.track(id)) {
-          this.kvSet("bag", bag);
-          return { trackId: id, source: "shuffle" };
-        }
-      }
-      const all = this.all("SELECT id FROM tracks").map((r) => r.id);
-      if (!all.length) {
-        this.kvSet("bag", []);
-        return null;
-      }
-      if (all.length === 1) {
-        this.kvSet("bag", []);
-        return { trackId: all[0], source: "shuffle" };
-      }
-      bag = shuffle(all.filter((id) => id !== currentId));
-    }
+    for (const id of this.kvGet("bag", [])) if (id !== currentId && this.track(id)) return { trackId: id, source: "shuffle" };
+    // Only one song in the library: it repeats.
+    const only = this.get("SELECT id FROM tracks LIMIT 1");
+    return only ? { trackId: only.id, source: "shuffle" } : null;
+  }
+
+  // Shuffle bag: every song plays once before anything repeats. Reshuffles as soon as the
+  // round's last song starts, so the preview always shows what will really play.
+  refillBag(currentId) {
+    const ids = new Set(this.all("SELECT id FROM tracks").map((r) => r.id));
+    let bag = this.kvGet("bag", []).filter((id) => id !== currentId && ids.has(id));
+    if (!bag.length) bag = shuffle([...ids].filter((id) => id !== currentId));
+    this.kvSet("bag", bag);
+  }
+
+  pickNext(currentId) {
+    this.refillBag(currentId);
+    const next = this.peek(currentId);
+    if (next?.queueId) this.run("DELETE FROM queue WHERE id = ?", next.queueId);
+    return next;
   }
 
   advance() {
@@ -539,6 +590,7 @@ export class Station {
     this.run("DELETE FROM history WHERE id NOT IN (SELECT id FROM history ORDER BY id DESC LIMIT 100)");
     // Whatever just played counts as this round's play, so drop it from the bag.
     this.kvSet("bag", this.kvGet("bag", []).filter((id) => id !== t.id));
+    this.refillBag(t.id);
     this.kvSet("now", now);
     this.scheduleEnd(now);
   }
@@ -562,6 +614,7 @@ export class Station {
 
   changed() {
     this.ensurePlaying();
+    this.refillBag(this.kvGet("now")?.trackId);
     this.broadcast();
   }
 
@@ -599,15 +652,23 @@ export class Station {
 
   state() {
     const now = this.kvGet("now");
+    const queue = this.all(
+      `SELECT q.id, q.user_id, u.username AS by, t.id AS track_id, t.title, t.channel, t.video_id, t.duration
+       FROM queue q JOIN tracks t ON t.id = q.track_id LEFT JOIN users u ON u.id = q.user_id
+       ORDER BY q.pos, q.id`
+    );
+    let upNext = null;
+    if (!queue.length) {
+      const p = this.peek(now?.trackId);
+      const t = p && this.track(p.trackId);
+      if (t) upNext = { source: p.source, track_id: t.id, title: t.title, channel: t.channel, added_by: t.added_by };
+    }
     return {
       type: "state",
       serverTime: Date.now(),
       now: now ? { ...now, track: this.track(now.trackId) } : null,
-      queue: this.all(
-        `SELECT q.id, q.priority, q.user_id, u.username AS by, t.id AS track_id, t.title, t.channel, t.video_id, t.duration
-         FROM queue q JOIN tracks t ON t.id = q.track_id LEFT JOIN users u ON u.id = q.user_id
-         ORDER BY q.priority, q.id`
-      ),
+      queue,
+      upNext,
       freshCount: this.count("SELECT COUNT(*) AS n FROM tracks WHERE play_count = 0"),
       libSize: this.count("SELECT COUNT(*) AS n FROM tracks"),
       recent: this.all(

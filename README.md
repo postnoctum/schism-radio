@@ -31,10 +31,11 @@ Then open http://localhost:3000. Data is stored in `./data`.
 
 ## How the radio picks the next song
 
-1. **Play Next:** songs someone bumped to the front.
-2. **Queue:** songs people queued, in the order they were added.
-3. **New songs:** anything in the library that has never played, oldest first.
-4. **Shuffle:** every song plays once before any song repeats, then the library reshuffles.
+1. **Queue:** one list, top first. **Queue** adds a song at the bottom. **Play next** puts it at the very top, so the most recent Play next plays first. Play next on a song that's already queued moves it to the top.
+2. **New songs:** anything in the library that has never played, oldest first.
+3. **Shuffle:** every song plays once before any song repeats, then the library reshuffles.
+
+When the queue is empty, the page shows the song that will play next from new songs or the shuffle.
 
 The station only advances while at least one person has pressed **Tune in**. If everyone leaves, it holds its place, so new songs aren't used up playing to an empty room.
 
@@ -47,14 +48,14 @@ The station learns each song's length from the first listener who plays it and r
 | Listen | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Add songs, queue songs | | ✓ | ✓ | ✓ | ✓ |
 | Play next | | | ✓ | ✓ | ✓ |
-| Skip, remove anyone's queued songs | | | | ✓ | ✓ |
+| Reorder the queue (move songs up and down), skip, remove anyone's queued songs | | | | ✓ | ✓ |
 | Delete from library, manage people | | | | | ✓ |
 
 These are defaults. From **Settings** on the radio page, admins can change any of them, along with how many songs each role can have waiting in the queue at once. Unchecking **Listen** for Guest makes the radio members-only.
 
 A few more rules:
 - Anyone can sign up. New accounts start as Guest until an officer promotes them.
-- People can always remove songs they queued themselves.
+- People can always remove songs they queued themselves, and anyone with Play next can move their own queued song to the top. Moving someone else's song takes Reorder queue.
 - Five wrong passwords lock that username out for five minutes.
 - The station always keeps at least one admin.
 
